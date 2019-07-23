@@ -1,0 +1,99 @@
+关掉自动换行, 或把窗口拉大些看!
+
+=======================================================
+Vivado将bit文件固化至SPI Flash配置存储器的方法（纯逻辑工程的固化）
+
+Setp1: 生成用于烧写Flash的mcs文件
+	在Vivado中的"Tcl Console"窗口中:
+		改变目录至bit文件所在目录:
+		cd ./<工程目录>/<工程名>.runs/impl_1/
+		使用write_cfgmem命令生成mcs文件:
+		write_cfgmem -size 16 -interface spix1 -format mcs -force -loadbit "up 0 <顶层模块名>.bit" ./<自己取名>.mcs
+			其中: "16", "spix1"根据具体的配置存储器设置; Vivado工程编译得到的bit文件均是使用工程中顶层模块的名字命名的.
+
+Step2: 使用mcs文件烧写Flash
+	在Vivado中的"Hardware Manager"中, 连接开发板, 在"Hardware"面板中:
+		在FPGA芯片名(如"xc7a35t_0")上单击右键, 选择"Add Configuration Memory Device",
+		选择SPI Flash的型号(如"s25fl128sxxxxxx0"), 单击"OK",
+		在弹出的对话框中会问是否立即烧写配置存储器, 可选"OK"立即烧写, 也可选"Cancel"稍后烧写.
+	在"Hardware"面板中, FPGA芯片名分支下, 会出现刚刚添加的SPI Flash名, 在其上单击右键, 选择"Program Configuration Memory Device":
+		在"Configuration File"处, 选择Step1生成的<自己取名>.mcs文件, 其余选项均保持默认, 单击"OK", 开始烧写.
+		烧写过程可能需要1,2分钟, 烧写完成后, 需对开发板重新上电, 或硬复位.
+
+=======================================================
+将运行于外部SDRAM的Microblaze软件固化于SPI Flash配置存储器的方法
+
+Xilinx提供的工具仅支持将运行于内部RAM的软件(.elf)与FPGA逻辑配置数据(.bit)合成新的bit文件(其中包含使用elf初始化RAM的内容),
+SDK中的“Xilinx Tools”-“Program FPGA”工具可完成这一工作, 如果你的软件是运行于片内RAM中的, 用前述的固化bit文件的方法固化此bit文件至Flash即可.
+
+对于运行于外部SDRAM的软件, 需要另做一个运行于内部RAM的bootloader工程, 此工程上电运行后, 将配置存储器中存储的软件复制到SDRAM,
+再跳转到SDRAM中运行.
+
+因此, 我们需要将bootloader的elf与逻辑的bit, 合成bit文件, 再将此bit文件与软件工程的二进制文件一起烧写进SPI Flash.
+
+Step1: 新建bootloader工程:
+	在SDK中新建Xilinx Application Project, 命名为bootloader, 语言选择"C", OS选择"standalone", 复制另附的bootloader.c文件到其中.
+	在bootloader工程的属性中:
+		"C/C++ Build" - "Settings" - "Tool Settings"中:
+			"Microblaze gcc Compiler" - "Optimization"中, 将"Optimization Level"设置为"-Os".
+			"Microblaze gcc Compiler" - "Debugging"中, 将"Debug Level"设置为"None".
+		以减小代码尺寸.
+	在Generate Link Script中, 将Code Sections, Data Sections和Heap and Stack均指定到片内RAM.
+
+Step2: 从elf文件生成bin文件:
+	使用另附的elf2bin脚本, 在Xilinx的Console中:
+		改变目录至软件工程的elf所在目录:
+		cd <工程目录>/<工程名>.sdk/<软件工程名>/<Debug或Release>/
+		使用elf2bin脚本生成bin文件(假定elf2bin脚本文件未加入系统路径, 并放置于工程目录所在的目录下):
+		(使用root身份赋予权限 chmod +x elf2bin, \ 
+		添加Xilinx到系统路径(vivado的安装路径下) #source /home/belief/Xilinx/Vivado/2018.1/settings64.sh  )
+		../../../elf2bin <软件工程名>.elf
+		这一步将生成vector.bin和rest.bin两个文件, 请记住它们的大小(比如40和22596).
+
+Step3: 修改bootloader.c并编译bootloader工程:
+	在bootloader.c中:
+		修改"VECTOR_SECTION_BYTE_NUM"宏的值为vector.bin文件的大小(如40).
+		修改"REST_SECTION_BYTE_NUM"宏的值为rest.bin文件的大小(如22596).
+		"VECTOR_SECTION_START_ADDR"宏和"SECTION_START_ADDR"宏:
+			对于xc7a35t可保持默认的"0x27FF00"和"0x280000", 如果是其它FPGA, 请修改到比FPGA配置数据尺寸稍大, 并保持它们的差值.
+		其它宏, 可根据实际情况修改.
+	编译生成bootloader.elf, 它位于bootloader工程目录下的Debug目录下.
+	当编译成功时将生成bootloader.elf，该工程仅含有bootloader.c文件,若创建时使用了hellowworld模板删去即可.
+
+Step4: 生成包含bootloader软件和FPGA配置数据的download.bit文件:
+	在SDK中, 选择菜单中的"Xilinx Tools" - "Program FPGA":
+		Bitstream处, 选择FPGA配置数据的bit文件, 一般为<顶层模块名>.bit.
+		BMM/MMI处, 选择<顶层模块名>.mmi
+		Software Configuration中的"ELF File to Initialize in Block RAM"栏, 选择上一步生成的<bootloader.elf>
+		不连接开发板, 单击"Program"按钮, 将在"<工程名>.sdk/<顶层模块名>_hw_platfrom_x"目录下生成download.bit,
+		期间提示下载出错, 不必理会.
+
+Step5: 使用download.bit, vector.bin和rest.bin生成用于烧写SPI Flash的mcs文件:
+	在Vivado中的"Tcl Console"窗口中:
+		改变目录到软件工程elf文件所在的目录中:
+		cd ./<工程目录>/<工程名>.sdk/<软件工程名>/<Debug或Release>/
+		使用write_cfgmem命令生成mcs文件:
+		write_cfgmem -size 16 -interface spix1 -format mcs -force \
+		-loadbit "up 0 ../../<顶层模块名>_hw_platform_0/download.bit" \
+		-loaddata "up 0x27FF00 ./vectors_section.bin up 0x280000 ./rest_section.bin" \
+		./hw_bl_sw.mcs
+		其中: 0x27FF00和0x280000应与bootloader.c中设置的一致.
+		将生成hw_bl_sw.mcs文件.
+		它在"<工程名>.sdk/<软件工程名>/Debug"下.
+write_cfgmem -size 16 -interface spix1 -format mcs -force -loadbit "up 0 ../../<顶层模块名>_hw_platform_0/download.bit" 
+-loaddata "up 0x27FF00 ./vectors_section.bin up 0x280000 ./rest_section.bin" ./hw_bl_sw.mcs		
+		
+		
+Step6: 使用hw_bl_sw.mcs文件烧写Flash(同上, 略)
+
+
+                        /--> vector.bin ---------------------------\
+<sdk_prj>.elf --(Step2)<                                            \
+                        \--> rest.bin ------------------------------->(Step5)--> hw_bl_sw.mcs -->(Step6)
+                                                                    /
+  (Step3)                                                          /
+bootloader.c --> bootloader.elf --\                               /
+                                   \                             /
+<vivado_prj>.bit ------------------->(Step4) --> download.bit --/
+                                   /
+<vivado_prj>.mmi -----------------/

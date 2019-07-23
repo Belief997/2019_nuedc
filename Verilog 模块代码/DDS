@@ -1,0 +1,88 @@
+﻿//DDS模块
+
+/*
+	该dds模块，带有默认参数----> 相位位宽（PHASE_W = 24） 正弦数据位宽（DATA_W = 12） 表长位宽（TABLE_AW = 12） 正弦表文件名（MEM_FILE = "SineTable1.dat")
+	输入 ----->频率关键字（FreqWord) 初相位/调相（PhaseShift） 时钟分频使能（ClkEn）  
+	输出 ------>  表内数据位宽的正弦值（[DATA_W - 1 : 0] Out）
+	程序主要是相位累加器，经过 时钟分频使能clken 后 -->相位phase累加 + 初相位/调相phaseshift  【增加频率精度通过增加相位位宽！！】
+	相位截高位（表长位）决定查表地址，地址定义时以数组形式定义 2^table_aw 个与表数据数量一致
+	DDS 频率关键字的计算f_out=(f_clk∙k)/2^N 
+  k = fout  * 2^N(相位宽)  / fclk
+所得的波形周期不固定 相邻的几个周期不等
+但频率是定的 周期相邻几个又成规律 成一个周期 可以这个周期取平均稍作估计
+主要的误差以代入公式计算
+
+*/
+
+
+module dds #( 
+	parameter PHASE_W = 24, 
+	parameter DATA_W = 12, 
+	parameter TABLE_AW = 12,
+	parameter MEM_FILE = "SineTable1.dat"
+)( 
+	input [PHASE_W - 1 : 0] FreqWord, 
+	input [PHASE_W - 1 : 0] PhaseShift,
+	input clk, 
+	input ClkEn, 
+	output reg signed [DATA_W - 1 : 0] Out
+) ;
+   	reg signed [DATA_W - 1 : 0] sinTable[2 ** TABLE_AW - 1 : 0]; // Sine table ROM
+   	reg [PHASE_W - 1 : 0] phase; // Phase Accumulater
+   	wire [PHASE_W - 1 : 0] addr = phase + PhaseShift; // Phase Shift
+
+initial begin
+   	   phase = 0;
+   	   $readmemh(MEM_FILE, sinTable); // Initialize the ROM
+end
+
+always@(posedge clk) begin
+      if(ClkEn) phase <= phase + FreqWord;
+   end
+   
+initial Out = 'b0;
+always@(posedge clk) begin
+      Out <= sinTable[addr[PHASE_W - 1 : PHASE_W - TABLE_AW]]; // Look up the table
+   end
+
+
+endmodule 
+
+
+//100M时钟下的 10k 正弦的testbench
+
+`timescale 1ns/1ps
+module tb;
+    reg clk;
+    reg [23:0] freq;
+    wire [23:0] phaseShift = 24'b0;
+    wire clkEn = 1'b1;
+    wire signed [11:0] out;
+    initial begin
+        clk = 1'b1;
+        freq = 24'd1678;
+        /*#10010 freq = 24'h08_0000;
+        #20000 freq = 24'h0C_0000;
+        #30000 freq = 24'h10_0000;
+        #40000 freq = 24'h18_0000;
+        #50000 freq = 24'h20_0000;
+        #60000 freq = 24'h30_0000;*/
+        //#70000 $stop();
+    end
+    always begin
+        #5 clk = ~clk;
+    end    
+    dds #( 
+	.PHASE_W (24), 
+	.DATA_W (12), 
+	.TABLE_AW  (12),
+	.MEM_FILE  ("SineTable12X12.dat")
+) dds_inst (
+       .FreqWord(freq),
+       .PhaseShift(phaseShift),
+       .clk(clk),
+       .ClkEn(clkEn),
+       .Out(out)) ;
+endmodule
+
+	

@@ -1,0 +1,291 @@
+//参考 http://blog.csdn.net/Cherish_x/article/details/76140191
+//等精度测频法
+/*
+
+set gate   ___|'''''''''''''''''''''''''''''''''''|___________________
+real gate  ___________|'''''''''''''''''''''''''''''''''''|_________________
+sig_in    ___|''''|___|''''|___|''''|___|''''|___|''''|___|''''|___|''''|___|''''|___|''''|___|''''|___|''''|___|''''|___   
+clk       ____|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_|'|_
+
+*/
+/////////////////////////////////////////////////////////
+
+set_property PACKAGE_PIN H2 [get_ports Sig_in];
+set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets Sig_in];
+
+//////////////////////////////////////////////////////
+module  FreMeasure(  
+    input                           clk,  
+    input                           rst_n,  //low active
+    input                           Sig_in,  
+    output              [31:0] Fre  //change the width 
+);  
+parameter T_1s = 28'd49_999_999; //50M
+parameter T_1s = 28'd99_999_999; //100M
+ 
+/***********set gate**********/// 
+reg [27:0]  TCount;  
+always @ (posedge clk or negedge rst_n)  
+    if(!rst_n)  
+        TCount <= 28'd0;  
+    else if(TCount >= T_1s)  
+        TCount <= 'd0;  
+    else  
+        TCount <= TCount + 1'b1;  
+  
+reg TCountCnt;  
+always @ (posedge clk or negedge rst_n)  
+    if(!rst_n)  
+        TCountCnt <= 1'b0;  
+    else if(TCount >= T_1s)  
+        TCountCnt <= ~TCountCnt;  
+          
+/***********real gate************/  
+reg startCnt;  
+always @ (posedge Sig_in)  
+    if(TCountCnt == 1'b1)  
+        startCnt <= 1'b1;  
+    else  
+        startCnt <= 1'b0;  
+  
+/************count freq in the real gate************/  
+reg [31:0]  SigTemp;  
+always @ (negedge Sig_in)  
+    if(startCnt == 1'b1)  
+        SigTemp <= SigTemp + 1'b1;  
+    else  
+        SigTemp <= 'd0;  
+/***************lock & output***********/  
+reg [31:0]  FreOut;  //32bit  9999--> 14bit  change measure freq data width
+always @ (negedge startCnt)  
+    FreOut <= SigTemp;  
+      
+      
+assign  Fre = FreOut;     
+endmodule  
+
+///////////////////////////////////////////////////////////////////////////////
+/*
+捕捉输入AB信号的上升边沿 每个边沿产生一个时钟周期的脉冲（延迟一个时钟周期） 两个信号相抵消
+Sig_A/sig_a0   ___________|''''''''''''''|______________|''''''''''''''|______________
+Sig_B   ________________________|''''''''''''''|______________|''''''''''''''|______________
+
+Sig_A/sig_a0   ___________|''''''''''''''|______________|''''''''''''''|______________
+clk                     __|'|_|'
+sig_a1             ___________|''''''''''''''|______________|''''''''''''''|______________
+PoseSig_A      ___________|'''|_________________________|'''|_________________
+PoseSig_B      _________________|'''|_________________________|'''|_________________
+PosetoLevelOut
+/PosetoLevel   '''''''''''|_____|'''''''''''''''''''''''|_____|'''''''''''''
+
+
+*/
+///////////////////////////////////////////////////////////////////////////////
+module  TimePosetoLevel(  
+    input                       clk,  
+    input                       rst_n,  
+    input                       Sig_A,  
+    input                       Sig_B,  
+    output                      PosetoLevelOut  
+);  
+  
+/**********catch A\B posedge*********************/  
+  
+reg     sig_a0;  
+reg     sig_a1;  
+always @ (posedge clk or negedge rst_n)  
+    if(!rst_n)  
+        begin  
+            sig_a0 <= 'd0;  
+            sig_a1 <= 'd0;  
+        end  
+    else  
+        begin  
+            sig_a0 <= Sig_A;  
+            sig_a1 <= sig_a0;  
+        end  
+wire    PoseSig_A;  
+assign  PoseSig_A = (~sig_a1) & (sig_a0);  
+  
+  
+reg     sig_b0;  
+reg     sig_b1;  
+always @ (posedge clk or negedge rst_n)  
+    if(!rst_n)  
+        begin  
+            sig_b0 <= 'd0;  
+            sig_b1 <= 'd0;  
+        end  
+    else  
+        begin  
+            sig_b0 <= Sig_B;  
+            sig_b1 <= sig_b0;  
+        end  
+          
+wire    PoseSig_B;        
+assign  PoseSig_B = (~sig_b1) & (sig_b0);  
+  
+/***********timeinter to measure level****************/  
+reg     PosetoLevel;  
+always @ (posedge clk or negedge rst_n)  
+        if(!rst_n)  
+            PosetoLevel <= 1'b0;  
+        else if(PoseSig_B)  
+            PosetoLevel <= 1'b1;  
+        else if(PoseSig_A)  
+            PosetoLevel <= 1'b0;  
+        else  
+            PosetoLevel <= PosetoLevel;  
+  
+//wire      PosetoLevelOut;  
+assign  PosetoLevelOut = PosetoLevel;             
+endmodule  
+
+///////////////////////////////////////////////////////////////////
+/*
+求平均减少误差
+输入底层时间间隔（高/低）转换的方波，内含等精度测频的预设闸门和真实闸门，真实闸门内是整数个周期
+用计数器分别数闸门内的高电平数和低电平数
+用计数器分别数闸门内高/低电平的总时钟数
+总时钟数除以总相应电平数得到单个周期内的高低电平的时钟数（需要修改后面的除法）
+
+可以参考此处测量占空比
+
+real gate  ___________|''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''|_________________
+sig_in    ___|''''|___|''''''|___|''''''|___|''''''|___|''''''|___|''''''|___|''''''|___|''''''|___|''''''|___|''''''|___|''''''|___|''''''|___   
+
+
+*/
+////////////////////////////////////////////////////////////////////
+module  Measure(  
+        input                           clk,  
+        input                           rst_n,  
+        input                           Level,//将时间间隔转换的高低电平输入  
+        output              [31:0]          HighNumber,  
+        output              [31:0]          LowNumber  
+);  
+  
+parameter   T = 28'd99_999_999;//100M 1s  
+/*********在1秒的闸门里求高电平和低电平的总数，求平均减少误差*************/  
+reg     [27:0]      TCount;  
+always @ (posedge clk or negedge rst_n)  
+    if(!rst_n)  
+        TCount <= 'd0;  
+    else if(TCount >= T)  
+        TCount <= 'd0;  
+    else      
+        TCount <= TCount + 1'b1;  
+          
+reg     TCountCnt;  
+always @ (posedge clk or negedge rst_n)  
+    if(!rst_n)  
+        TCountCnt <= 'd0;  
+    else if(TCount >= T)  
+        TCountCnt <= ~TCountCnt;  
+          
+reg     startCnt;  
+always @ (posedge Level)  
+    if(TCountCnt)  
+        startCnt <= 1'b1;  
+    else      
+        startCnt <= 1'b0;  
+/**************检测高低电平的数量*******************/          
+reg     [31:0]  HighNum;  
+reg     [31:0]  LowNum;  
+always @ (posedge Level)  
+    if(startCnt)  
+        HighNum <= HighNum + 1'b1;  
+    else      
+        HighNum <= 'd0;  
+          
+always @ (negedge Level)  
+    if(startCnt)  
+        LowNum <= LowNum + 1'b1;  
+    else      
+        LowNum <= 'd0;  
+/***********分别对高低电平计数*************************/  
+reg [31:0]  HighCount;  
+reg [31:0]  LowCount;  
+  
+always @ (posedge clk or negedge rst_n)  
+    if(!rst_n)  
+        begin  
+            HighCount <= 'd0;  
+        end  
+    else if(!startCnt)  
+        begin  
+            HighCount <= 'd0;  
+            LowCount <= 'd0;  
+        end  
+    else if(startCnt && Level)  
+        begin  
+            HighCount <= HighCount + 1'b1;  
+        end  
+    else if(startCnt && ~Level)  
+        begin  
+            LowCount <= LowCount + 1'b1;  
+        end  
+    else      
+        begin  
+            HighCount <= HighCount;  
+            LowCount  <= LowCount;  
+        end  
+  
+  
+/*******锁存********************/  
+reg [31:0]  HighNumTo;  
+reg [31:0]  LowNumTo;     
+reg [31:0]  HighCountTo;  
+reg [31:0]  LowCountTo;  
+always @ (negedge startCnt)  
+begin  
+    HighCountTo <= HighCount;  
+    LowCountTo  <= LowCount;  
+    HighNumTo   <= HighNum;  
+    LowNumTo    <= LowNum;  
+end  
+  
+//wire   [31:0]  HighNumber;  
+//wire   [31:0] LowNumber;  
+  
+//assign    HighNumber = HighCountTo/HighNumTo;//我在这里调用了除法器的ip核，其实完全可以这么写，两者占用的资源不同，  
+//assign    LowNumber  = LowCountTo/LowNumTo;//只是这样写编译会变慢，应为Quartus要替你产生大面积的电路  
+/*******求得单个高低电平的基准时钟的数量************/  
+wire        [31:0]      remian_1;  
+wire        [31:0]      remain_2;  
+DIV_1 DIV_1_inst_H (  
+    .denom(HighNumTo),//分母  
+    .numer(HighCountTo),//分子  
+    .quotient(HighNumber),//商  
+    .remain(remain_1)//余数  
+    );  
+  
+  
+DIV_1 DIV_1_inst_L (  
+    .denom(LowNumTo),//分母  
+    .numer(LowCountTo),//分子  
+    .quotient(LowNumber),//商  
+    .remain(remain_2)//余数  
+    );  
+          
+endmodule  
+//////////////////////////////////////////////////////////////////////////////////
+/*
+选取了两同频方波因相位不同产生的时间间隔方波，以最短时间作为时间间隔，即输出的时间（时钟数）是 <= T(input)
+时钟数到时间需要换算
+
+*/
+//////////////////////////////////////////////////////////////////////////////////
+module  TimeIMeasure(  
+    input                       clk,  
+    input                       rst_n,  
+    input               [31:0]      HighMeasureTemp,//输入高电平的基准时钟的个数  
+    input               [31:0]      LowMeasureTemp,//输入低电平的基准时钟的个数  
+    input                       PosetoLevel,  
+    output              [31:0]      TimeInter   
+);  
+  
+assign  TimeInter = (LowMeasureTemp > HighMeasureTemp) ? HighMeasureTemp: LowMeasureTemp + 1'b1;
+//比较，求基准时钟最小 //的作为时间间隔。后面在VGA显示的时候需要换算成时间。     
+  
+endmodule 

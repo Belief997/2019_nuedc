@@ -1,0 +1,81 @@
+//debug
+
+//port
+
+    input key0,
+    output reg[2:0] flag//8 debug states
+   
+   
+////////////////////////////////////////////////////////
+//debug flag
+wire k0;
+reg [15:0] temp;//changeable output , adjust width and type   
+initial begin flag = 'b0; temp = 'b0; end 
+always@(posedge clk)begin
+    if(k0)begin
+    if(flag != 3'd6)  flag <= flag + 2'b1;
+    else if(flag == 3'd6)   flag <= 3'd0;
+    end
+end
+always@(posedge clk) begin
+    case(flag)
+        3'd0:begin
+            temp <= ;
+           end
+        3'd1:begin
+            temp <= ;
+           end 
+        3'd2:begin
+            temp <= ;
+           end
+        3'd3:begin
+            temp <= ;
+           end
+        3'd4:begin
+            temp <= ;
+           end  
+        3'd5:begin
+            temp <= ;
+            end
+        default: begin
+            temp <= ;
+        end
+    endcase
+end
+
+ keys the_key(
+	.clk(clk),
+	.key0(key0),//key1,key2,
+	.k0(k0)//,k1,k2
+
+);
+
+/////////////////////////////////////////////////////////////////   
+//master
+//bank 34
+set_property PACKAGE_PIN T2  [get_ports key0];
+set_property PACKAGE_PIN P5  [get_ports flag[0]];
+set_property PACKAGE_PIN L5  [get_ports flag[1]];
+set_property PACKAGE_PIN N4  [get_ports flag[2]];
+////////////////////////////////////////////////////////////////
+module keys (
+	input wire clk,
+	input wire key0,
+	output wire k0
+);
+	reg [19:0] cnt_10ms;
+	initial cnt_10ms = 20'b0;
+	always@(posedge clk) begin		
+			if(cnt_10ms < 20'd1000_000) cnt_10ms <= cnt_10ms + 20'b1;//20'd1000_000
+			else cnt_10ms <= 20'b0;
+	end
+	reg key_0_smp;
+	initial begin	key_0_smp = 0;end
+	always@(posedge clk) begin
+		if(cnt_10ms == 20'd000) begin
+			key_0_smp <= key0;
+		end end
+	reg k0_dly, k1_dly,k2_dly ;
+	always@(posedge clk) begin		k0_dly = key_0_smp;end
+	assign k0= ({key_0_smp, k0_dly} == 2'b10);
+endmodule

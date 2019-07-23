@@ -1,0 +1,15 @@
+#!/bin/bash
+if [ $# != 1 ]; then
+    echo "+----------------------+"
+    echo "| Usage: elf2bin <elf> |"
+    echo "+----------------------+"
+else
+    if [ ! -f "$1" ]; then
+        echo "You must specify a valid elf file."
+	exit
+    fi
+    mb-objcopy -O binary -R .vectors.reset -R .vectors.sw_exception -R .vectors.interrupt -R .vectors.hw_exception "$1" rest_section.bin
+    mb-objcopy -O binary -j .vectors.reset -j .vectors.sw_exception -j .vectors.interrupt -j .vectors.hw_exception "$1" vectors_section.bin
+    echo "bin info:"
+    ls -l *_section.bin
+fi

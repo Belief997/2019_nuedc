@@ -1,0 +1,44 @@
+
+module caculate#(
+		parameter W = 32,
+    parameter FSW = 16,
+//    parameter real A = 0.0000816,
+    parameter real B = 0.023052344174174300,//
+    parameter real C = 105.960571837069,//
+    parameter  D = 122_686//
+    
+)(
+	input clk,
+	input [W-1:0]  x, 
+	output reg [13:0] result
+
+);
+//	wire signed [W-1:0] a = (A * (2.0 ** FSW));
+	wire signed [W-1:0] b = (B * (2.0 ** FSW));
+	wire signed [W-1:0] c = (C * (2.0 ** FSW));
+    
+//    wire signed [3*W-1:0] axL = a * (x)* (x)* (x);//^3
+    wire signed [3*W-1:0] bxL = b * (x)* (x);//^2
+    wire signed [3*W-1:0] cxL = c * (x);
+    
+    
+//    wire signed [W-1:0] ax = axL >> (FSW);
+    wire signed [W-1:0] bx = bxL >> (FSW);
+    wire signed [W-1:0] cx = cxL >> (FSW);
+    
+    
+//    wire signed [W-1:0] y = ax - bx + cx - D;
+
+//output result delay
+initial result = 'b0;
+reg [1:0] cnt;
+wire co = (cnt == 'd3);
+initial cnt = 'b0;
+always@(posedge clk)begin
+    cnt <= cnt + 1'b1;
+end
+always@(posedge co) begin
+    result <=  bx - cx + D;//you can adjust the character here
+end
+
+endmodule 
